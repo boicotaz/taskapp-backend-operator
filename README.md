@@ -1,135 +1,128 @@
-# operator
-// TODO(user): Add simple overview of use/purpose
+# taskapp-backend-operator
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+A Kubernetes operator for the taskapp backend service, built with [Kubebuilder v4](https://book.kubebuilder.io/). It introduces a `Backend` Custom Resource that declaratively manages the backend `Deployment` and `Service` — replacing hand-crafted Helm templates with a reconciliation loop that continuously ensures the cluster matches the desired state.
 
-## Getting Started
+## How it works
 
-### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+The operator watches `Backend` resources in the `apps.taskapp.io/v1alpha1` API group. On every reconcile it:
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+1. Creates or updates a `Deployment` with the specified image, tag, and replica count
+2. Creates or updates a `ClusterIP` `Service` (port 80 → 8080)
+3. Injects the database password from a named `Secret` as `DB_PASSWORD`
+4. Updates the `Backend` status with `readyReplicas` and an `Available` condition
 
-```sh
-make docker-build docker-push IMG=<some-registry>/operator:tag
+Both the Deployment and Service are owned by the Backend CR, so deleting the CR cascades to all child resources.
+
+## Backend CRD
+
+```yaml
+apiVersion: apps.taskapp.io/v1alpha1
+kind: Backend
+metadata:
+  name: taskapp-backend
+spec:
+  image: boicotaz/taskapp-backend   # container image repository
+  tag: abc1234                       # image tag (CI writes this)
+  replicas: 2                        # optional, default 1
+  dbSecret: taskapp-database-secret  # Secret with POSTGRES_PASSWORD key
 ```
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+**Status fields:**
 
-**Install the CRDs into the cluster:**
+| Field | Description |
+|---|---|
+| `readyReplicas` | Number of pods currently ready |
+| `conditions[Available]` | `True` when readyReplicas >= desired |
 
-```sh
+## Repository structure
+
+```
+taskapp-backend-operator/
+├── api/v1alpha1/
+│   ├── backend_types.go          # CRD schema (Backend spec/status)
+│   └── groupversion_info.go      # API group registration
+├── internal/controller/
+│   └── backend_controller.go     # Reconciliation logic
+├── cmd/main.go                   # Manager entry point
+├── config/
+│   ├── crd/bases/                # Generated CRD YAML (make manifests)
+│   ├── rbac/                     # Generated RBAC (make manifests)
+│   ├── manager/                  # Manager Deployment template
+│   ├── default/                  # Kustomize base
+│   └── samples/                  # Example Backend CR
+├── test/
+│   ├── e2e/                      # End-to-end tests (Kind cluster)
+│   └── utils/
+├── Dockerfile                    # Multi-stage: golang builder + distroless runtime
+└── Makefile                      # Build, test, deploy automation
+```
+
+## Prerequisites
+
+- Go 1.25+
+- Docker
+- kubectl
+- A running Kubernetes cluster (local: kind or minikube)
+
+## Development
+
+```bash
+# Generate CRDs and RBAC from markers in api/ and internal/controller/
+make manifests
+
+# Generate DeepCopy methods
+make generate
+
+# Run unit tests (uses envtest — no cluster required)
+make test
+
+# Run linter
+make lint
+
+# Run manager locally against your current kubeconfig context
+make install   # installs CRDs first
+make run
+```
+
+## Build and deploy
+
+```bash
+# Build and push the operator image
+make docker-build docker-push IMG=boicotaz/taskapp-backend-operator:<tag>
+
+# Install CRDs into the cluster
 make install
-```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+# Deploy the manager
+make deploy IMG=boicotaz/taskapp-backend-operator:<tag>
 
-```sh
-make deploy IMG=<some-registry>/operator:tag
-```
-
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
-
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
-
-```sh
+# Apply a sample Backend CR
 kubectl apply -k config/samples/
 ```
 
->**NOTE**: Ensure that the samples has default values to test it out.
+## Uninstall
 
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
-
-```sh
-kubectl delete -k config/samples/
+```bash
+kubectl delete -k config/samples/   # delete Backend CRs
+make undeploy                        # remove manager
+make uninstall                       # remove CRDs
 ```
 
-**Delete the APIs(CRDs) from the cluster:**
+## Distribution via Helm
 
-```sh
-make uninstall
-```
+The operator is packaged as a Helm chart in the companion repo [`taskapp-helmcharts`](https://github.com/boicotaz/taskapp-helmcharts) under `taskapp-operator/`. It is deployed by ArgoCD as part of the standard sync wave order — see [`taskapp-argocd`](https://github.com/boicotaz/taskapp-argocd).
 
-**UnDeploy the controller from the cluster:**
+## RBAC
 
-```sh
-make undeploy
-```
+The operator requires the following permissions (auto-generated from markers):
 
-## Project Distribution
-
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/operator:tag
-```
-
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/operator/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v2-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
+| Resource | Verbs |
+|---|---|
+| `apps.taskapp.io/backends` | get, list, watch, create, update, patch, delete |
+| `apps.taskapp.io/backends/status` | get, update, patch |
+| `apps/deployments` | get, list, watch, create, update, patch, delete |
+| `core/services` | get, list, watch, create, update, patch, delete |
 
 ## License
 
-Copyright 2026.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
+Copyright 2026. Licensed under the [Apache License 2.0](LICENSE).

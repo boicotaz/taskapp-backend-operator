@@ -30,10 +30,13 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	appsv1alpha1 "github.com/boicotaz/taskapp-operator/api/v1alpha1"
 )
+
+const backendFinalizer = "apps.taskapp.io/finalizer"
 
 // BackendReconciler reconciles a Backend object
 type BackendReconciler struct {
@@ -58,6 +61,18 @@ func (r *BackendReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
+	if !backend.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, r.handleDeletion(ctx, backend)
+	}
+
+	if !controllerutil.ContainsFinalizer(backend, backendFinalizer) {
+		controllerutil.AddFinalizer(backend, backendFinalizer)
+		if err := r.Update(ctx, backend); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
 	if err := r.reconcileDeployment(ctx, backend); err != nil {
 		log.Error(err, "failed to reconcile Deployment")
 		return ctrl.Result{}, err
@@ -74,6 +89,46 @@ func (r *BackendReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *BackendReconciler) handleDeletion(ctx context.Context, backend *appsv1alpha1.Backend) error {
+	if !controllerutil.ContainsFinalizer(backend, backendFinalizer) {
+		return nil
+	}
+
+	if err := r.deleteDeployment(ctx, backend); err != nil {
+		return err
+	}
+	if err := r.deleteService(ctx, backend); err != nil {
+		return err
+	}
+
+	controllerutil.RemoveFinalizer(backend, backendFinalizer)
+	return r.Update(ctx, backend)
+}
+
+func (r *BackendReconciler) deleteDeployment(ctx context.Context, backend *appsv1alpha1.Backend) error {
+	deploy := &appsv1.Deployment{}
+	err := r.Get(ctx, types.NamespacedName{Name: deploymentName(backend), Namespace: backend.Namespace}, deploy)
+	if errors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return client.IgnoreNotFound(r.Delete(ctx, deploy))
+}
+
+func (r *BackendReconciler) deleteService(ctx context.Context, backend *appsv1alpha1.Backend) error {
+	svc := &corev1.Service{}
+	err := r.Get(ctx, types.NamespacedName{Name: serviceName(backend), Namespace: backend.Namespace}, svc)
+	if errors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return client.IgnoreNotFound(r.Delete(ctx, svc))
 }
 
 func (r *BackendReconciler) reconcileDeployment(ctx context.Context, backend *appsv1alpha1.Backend) error {
