@@ -1,0 +1,12 @@
+apiVersion: apps.taskapp.io/v1alpha1
+kind: Backend
+metadata:
+  name: crd
+  labels:
+    app.kubernetes.io/name: crd
+    app.kubernetes.io/managed-by: taskapp-operator
+spec:
+  image: boicotaz/taskapp-backend
+  tag: latest
+  replicas: 1
+  dbSecret: taskapp-database-secret
