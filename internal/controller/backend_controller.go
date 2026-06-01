@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -41,7 +42,8 @@ const backendFinalizer = "apps.taskapp.io/finalizer"
 // BackendReconciler reconciles a Backend object
 type BackendReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=apps.taskapp.io,resources=backends,verbs=get;list;watch;create;update;patch;delete
@@ -75,16 +77,19 @@ func (r *BackendReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	if err := r.reconcileDeployment(ctx, backend); err != nil {
 		log.Error(err, "failed to reconcile Deployment")
+		r.Recorder.Event(backend, corev1.EventTypeWarning, "ReconcileError", err.Error())
 		return ctrl.Result{}, err
 	}
 
 	if err := r.reconcileService(ctx, backend); err != nil {
 		log.Error(err, "failed to reconcile Service")
+		r.Recorder.Event(backend, corev1.EventTypeWarning, "ReconcileError", err.Error())
 		return ctrl.Result{}, err
 	}
 
 	if err := r.updateStatus(ctx, backend); err != nil {
 		log.Error(err, "failed to update status")
+		r.Recorder.Event(backend, corev1.EventTypeWarning, "ReconcileError", err.Error())
 		return ctrl.Result{}, err
 	}
 
@@ -140,7 +145,11 @@ func (r *BackendReconciler) reconcileDeployment(ctx context.Context, backend *ap
 	existing := &appsv1.Deployment{}
 	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
 	if errors.IsNotFound(err) {
-		return r.Create(ctx, desired)
+		if err := r.Create(ctx, desired); err != nil {
+			return err
+		}
+		r.Recorder.Event(backend, corev1.EventTypeNormal, "DeploymentCreated", "Created deployment")
+		return nil
 	}
 	if err != nil {
 		return err
@@ -152,7 +161,11 @@ func (r *BackendReconciler) reconcileDeployment(ctx context.Context, backend *ap
 	}
 	existing.Spec.Replicas = desired.Spec.Replicas
 	existing.Spec.Template.Spec = desired.Spec.Template.Spec
-	return r.Update(ctx, existing)
+	if err := r.Update(ctx, existing); err != nil {
+		return err
+	}
+	r.Recorder.Event(backend, corev1.EventTypeNormal, "DeploymentUpdated", "Updated deployment")
+	return nil
 }
 
 func (r *BackendReconciler) reconcileService(ctx context.Context, backend *appsv1alpha1.Backend) error {
@@ -213,6 +226,11 @@ func (r *BackendReconciler) updateStatus(ctx context.Context, backend *appsv1alp
 	if existing != nil {
 		if existing.Status != available {
 			existing.LastTransitionTime = metav1.Now()
+			if available == metav1.ConditionFalse {
+				r.Recorder.Event(backend, corev1.EventTypeWarning, "Unavailable", message)
+			} else {
+				r.Recorder.Event(backend, corev1.EventTypeNormal, "Available", message)
+			}
 		}
 		existing.Status = cond.Status
 		existing.Reason = cond.Reason
