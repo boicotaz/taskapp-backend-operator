@@ -181,7 +181,7 @@ func main() {
 	if err := (&controller.BackendReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("backend-controller"),
+		Recorder: mgr.GetEventRecorderFor("backend-controller"), //nolint:staticcheck
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "backend")
 		os.Exit(1)

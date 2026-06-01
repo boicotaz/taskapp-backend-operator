@@ -98,7 +98,7 @@ var _ = BeforeSuite(func() {
 	Expect((&BackendReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("backend-controller"),
+		Recorder: mgr.GetEventRecorderFor("backend-controller"), //nolint:staticcheck
 	}).SetupWithManager(mgr)).To(Succeed())
 
 	go func() {
