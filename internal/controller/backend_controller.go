@@ -211,6 +211,9 @@ func (r *BackendReconciler) updateStatus(ctx context.Context, backend *appsv1alp
 
 	existing := findCondition(backend.Status.Conditions, "Available")
 	if existing != nil {
+		if existing.Status != available {
+			existing.LastTransitionTime = metav1.Now()
+		}
 		existing.Status = cond.Status
 		existing.Reason = cond.Reason
 		existing.Message = cond.Message
