@@ -159,15 +159,13 @@ func (r *BackendReconciler) reconcileQueue(ctx context.Context, backend *appsv1a
 	desired := &unstructured.Unstructured{}
 	desired.SetGroupVersionKind(sqsQueueGVK)
 	desired.SetName(name)
-	desired.SetAnnotations(map[string]string{
-		"crossplane.io/external-name": name,
-	})
 	desired.SetLabels(map[string]string{
 		"apps.taskapp.io/owned-by-backend":   backend.Name,
 		"apps.taskapp.io/owned-by-namespace": backend.Namespace,
 	})
 
 	forProvider := map[string]any{
+		"name":   name,
 		"region": sqsRegion(),
 		"tags": map[string]any{
 			"managed-by": "taskapp-operator",
