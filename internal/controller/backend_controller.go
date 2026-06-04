@@ -362,6 +362,8 @@ func (r *BackendReconciler) updateStatus(ctx context.Context, backend *appsv1alp
 		return client.IgnoreNotFound(err)
 	}
 
+	patch := client.MergeFrom(backend.DeepCopy())
+
 	backend.Status.ReadyReplicas = deploy.Status.ReadyReplicas
 	backend.Status.QueueURL = queueURL
 
@@ -407,7 +409,7 @@ func (r *BackendReconciler) updateStatus(ctx context.Context, backend *appsv1alp
 		})
 	}
 
-	return r.Status().Update(ctx, backend)
+	return client.IgnoreNotFound(r.Status().Patch(ctx, backend, patch))
 }
 
 func (r *BackendReconciler) setCondition(backend *appsv1alpha1.Backend, cond metav1.Condition) {
