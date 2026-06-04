@@ -26,8 +26,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -164,9 +164,9 @@ func (r *BackendReconciler) reconcileQueue(ctx context.Context, backend *appsv1a
 		"apps.taskapp.io/owned-by-namespace": backend.Namespace,
 	})
 
-	forProvider := map[string]interface{}{
+	forProvider := map[string]any{
 		"region": sqsRegion(),
-		"tags": map[string]interface{}{
+		"tags": map[string]any{
 			"managed-by": "taskapp-operator",
 		},
 	}
@@ -174,8 +174,8 @@ func (r *BackendReconciler) reconcileQueue(ctx context.Context, backend *appsv1a
 		forProvider["fifoQueue"] = true
 	}
 	if dlqARN != "" {
-		forProvider["redrivePolicy"] = []interface{}{
-			map[string]interface{}{
+		forProvider["redrivePolicy"] = []any{
+			map[string]any{
 				"deadLetterTargetArn": dlqARN,
 				"maxReceiveCount":     5,
 			},
@@ -207,7 +207,7 @@ func (r *BackendReconciler) reconcileQueue(ctx context.Context, backend *appsv1a
 	conditions, _, _ := unstructured.NestedSlice(existing.Object, "status", "conditions")
 	ready := false
 	for _, c := range conditions {
-		cond, ok := c.(map[string]interface{})
+		cond, ok := c.(map[string]any)
 		if !ok {
 			continue
 		}
