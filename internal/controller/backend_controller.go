@@ -314,13 +314,18 @@ func (r *BackendReconciler) reconcileDeployment(ctx context.Context, backend *ap
 		return err
 	}
 
+	desiredContainer := desired.Spec.Template.Spec.Containers[0]
+	existingContainer := existing.Spec.Template.Spec.Containers[0]
 	if equality.Semantic.DeepEqual(existing.Spec.Replicas, desired.Spec.Replicas) &&
-		equality.Semantic.DeepEqual(existing.Spec.Template.Spec, desired.Spec.Template.Spec) {
+		existingContainer.Image == desiredContainer.Image &&
+		equality.Semantic.DeepEqual(existingContainer.Env, desiredContainer.Env) {
 		return nil
 	}
+	patch := client.MergeFrom(existing.DeepCopy())
 	existing.Spec.Replicas = desired.Spec.Replicas
-	existing.Spec.Template.Spec = desired.Spec.Template.Spec
-	if err := r.Update(ctx, existing); err != nil {
+	existing.Spec.Template.Spec.Containers[0].Image = desiredContainer.Image
+	existing.Spec.Template.Spec.Containers[0].Env = desiredContainer.Env
+	if err := r.Patch(ctx, existing, patch); err != nil {
 		return err
 	}
 	r.Recorder.Event(backend, corev1.EventTypeNormal, "DeploymentUpdated", "Updated deployment")
