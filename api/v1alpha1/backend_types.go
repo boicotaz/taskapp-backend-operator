@@ -20,6 +20,28 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// QueueType defines the SQS queue type
+// +kubebuilder:validation:Enum=standard;fifo
+type QueueType string
+
+const (
+	QueueTypeStandard QueueType = "standard"
+	QueueTypeFifo     QueueType = "fifo"
+)
+
+// QueueSpec defines the optional SQS queue desired by the Backend
+type QueueSpec struct {
+	// type is the SQS queue type: standard or fifo
+	// +kubebuilder:default=standard
+	// +optional
+	Type QueueType `json:"type,omitempty"`
+
+	// deadLetter enables a dead-letter queue for this queue
+	// +kubebuilder:default=false
+	// +optional
+	DeadLetter bool `json:"deadLetter,omitempty"`
+}
+
 // BackendSpec defines the desired state of Backend
 type BackendSpec struct {
 	// image is the container image repository (e.g. boicotaz/taskapp-backend)
@@ -38,6 +60,11 @@ type BackendSpec struct {
 	// dbSecret is the name of the Secret containing the DB_PASSWORD key
 	// +kubebuilder:validation:Required
 	DBSecret string `json:"dbSecret"`
+
+	// queue optionally provisions an SQS queue for this Backend.
+	// Omit the field entirely if no queue is needed.
+	// +optional
+	Queue *QueueSpec `json:"queue,omitempty"`
 }
 
 // BackendStatus defines the observed state of Backend.
@@ -45,6 +72,10 @@ type BackendStatus struct {
 	// readyReplicas is the number of pods currently ready
 	// +optional
 	ReadyReplicas int32 `json:"readyReplicas,omitempty"`
+
+	// queueURL is the URL of the provisioned SQS queue, populated once ready.
+	// +optional
+	QueueURL string `json:"queueURL,omitempty"`
 
 	// conditions represent the current state of the Backend resource.
 	// +listType=map
@@ -59,6 +90,7 @@ type BackendStatus struct {
 // +kubebuilder:printcolumn:name="Tag",type=string,JSONPath=`.spec.tag`
 // +kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=`.spec.replicas`
 // +kubebuilder:printcolumn:name="Ready",type=integer,JSONPath=`.status.readyReplicas`
+// +kubebuilder:printcolumn:name="QueueURL",type=string,JSONPath=`.status.queueURL`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Backend is the Schema for the backends API
