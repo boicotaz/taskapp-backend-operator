@@ -96,6 +96,10 @@ func (r *BackendReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
+	if requeue {
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+
 	if err := r.reconcileDeployment(ctx, backend, queueURL); err != nil {
 		log.Error(err, "failed to reconcile Deployment")
 		r.Recorder.Event(backend, corev1.EventTypeWarning, "ReconcileError", err.Error())
@@ -114,9 +118,6 @@ func (r *BackendReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
-	if requeue {
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-	}
 	return ctrl.Result{}, nil
 }
 
