@@ -82,6 +82,11 @@ spec:
                     - standard
                     - fifo
                     type: string
+                  urlEnvVar:
+                    default: SQS_QUEUE_URL
+                    description: urlEnvVar is the name of the environment variable
+                      injected into the container with the queue URL.
+                    type: string
                 type: object
               replicas:
                 default: 1

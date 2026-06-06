@@ -40,6 +40,11 @@ type QueueSpec struct {
 	// +kubebuilder:default=false
 	// +optional
 	DeadLetter bool `json:"deadLetter,omitempty"`
+
+	// urlEnvVar is the name of the environment variable injected into the container with the queue URL.
+	// +kubebuilder:default=SQS_QUEUE_URL
+	// +optional
+	URLEnvVar string `json:"urlEnvVar,omitempty"`
 }
 
 // BackendSpec defines the desired state of Backend
