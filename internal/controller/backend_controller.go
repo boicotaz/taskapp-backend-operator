@@ -123,7 +123,7 @@ func (r *BackendReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 func (r *BackendReconciler) reconcileSQS(ctx context.Context, backend *appsv1alpha1.Backend) (string, bool, error) {
 	if backend.Spec.Queue == nil {
-		return "", false, nil
+		return "", false, r.deleteQueue(ctx, backend)
 	}
 
 	log := logf.FromContext(ctx)
