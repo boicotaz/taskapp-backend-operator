@@ -82,6 +82,7 @@ func (r *BackendReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	if !controllerutil.ContainsFinalizer(backend, backendFinalizer) {
+		log.Info("adding finalizer")
 		controllerutil.AddFinalizer(backend, backendFinalizer)
 		if err := r.Update(ctx, backend); err != nil {
 			return ctrl.Result{}, err
@@ -122,11 +123,12 @@ func (r *BackendReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 func (r *BackendReconciler) reconcileSQS(ctx context.Context, backend *appsv1alpha1.Backend) (string, bool, error) {
+	log := logf.FromContext(ctx)
+
 	if backend.Spec.Queue == nil {
+		log.Info("queue spec removed, deleting owned queues")
 		return "", false, r.deleteQueue(ctx, backend)
 	}
-
-	log := logf.FromContext(ctx)
 
 	// If deadLetter is requested, ensure the DLQ exists and is ready first.
 	dlqARN := ""
@@ -136,9 +138,10 @@ func (r *BackendReconciler) reconcileSQS(ctx context.Context, backend *appsv1alp
 			return "", false, err
 		}
 		if requeue || arn == "" {
-			log.Info("waiting for DLQ to become ready")
+			log.Info("waiting for DLQ to become ready", "queue", sqsDLQName(backend))
 			return "", true, nil
 		}
+		log.Info("DLQ ready", "queue", sqsDLQName(backend))
 		dlqARN = arn
 	}
 
@@ -147,7 +150,7 @@ func (r *BackendReconciler) reconcileSQS(ctx context.Context, backend *appsv1alp
 		return "", false, err
 	}
 	if requeue || url == "" {
-		log.Info("waiting for Queue to become ready")
+		log.Info("waiting for Queue to become ready", "queue", sqsQueueName(backend))
 		return "", true, nil
 	}
 	return url, false, nil
@@ -157,6 +160,8 @@ func (r *BackendReconciler) reconcileSQS(ctx context.Context, backend *appsv1alp
 // its URL (for standard queues) or ARN (for DLQs, read from status.atProvider.arn).
 // resultValue is the URL for the main queue, the ARN for the DLQ.
 func (r *BackendReconciler) reconcileQueue(ctx context.Context, backend *appsv1alpha1.Backend, name, dlqARN string, fifo bool) (string, bool, error) {
+	log := logf.FromContext(ctx)
+
 	desired := &unstructured.Unstructured{}
 	desired.SetGroupVersionKind(sqsQueueGVK)
 	desired.SetName(name)
@@ -198,6 +203,7 @@ func (r *BackendReconciler) reconcileQueue(ctx context.Context, backend *appsv1a
 		if err := r.Create(ctx, desired); err != nil {
 			return "", false, err
 		}
+		log.Info("created queue", "queue", name)
 		r.Recorder.Event(backend, corev1.EventTypeNormal, "QueueCreated", fmt.Sprintf("Created Queue %s", name))
 		return "", true, nil
 	}
@@ -219,6 +225,7 @@ func (r *BackendReconciler) reconcileQueue(ctx context.Context, backend *appsv1a
 		}
 	}
 	if !ready {
+		log.Info("queue not yet ready, requeueing", "queue", name)
 		return "", true, nil
 	}
 
@@ -226,13 +233,17 @@ func (r *BackendReconciler) reconcileQueue(ctx context.Context, backend *appsv1a
 	if dlqARN == "" && !fifo {
 		// this is a DLQ call — return ARN
 		arn, _, _ := unstructured.NestedString(existing.Object, "status", "atProvider", "arn")
+		log.Info("queue ready", "queue", name)
 		return arn, false, nil
 	}
 	url, _, _ := unstructured.NestedString(existing.Object, "status", "atProvider", "url")
+	log.Info("queue ready", "queue", name)
 	return url, false, nil
 }
 
 func (r *BackendReconciler) deleteQueue(ctx context.Context, backend *appsv1alpha1.Backend) error {
+	log := logf.FromContext(ctx)
+
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   sqsQueueGVK.Group,
@@ -249,14 +260,19 @@ func (r *BackendReconciler) deleteQueue(ctx context.Context, backend *appsv1alph
 		if err := client.IgnoreNotFound(r.Delete(ctx, &list.Items[i])); err != nil {
 			return err
 		}
+		log.Info("deleted owned queue", "queue", list.Items[i].GetName())
 	}
 	return nil
 }
 
 func (r *BackendReconciler) handleDeletion(ctx context.Context, backend *appsv1alpha1.Backend) error {
+	log := logf.FromContext(ctx)
+
 	if !controllerutil.ContainsFinalizer(backend, backendFinalizer) {
 		return nil
 	}
+
+	log.Info("handling deletion")
 
 	if err := r.deleteDeployment(ctx, backend); err != nil {
 		return err
@@ -268,6 +284,7 @@ func (r *BackendReconciler) handleDeletion(ctx context.Context, backend *appsv1a
 		return err
 	}
 
+	log.Info("finalizer removed, deletion complete")
 	controllerutil.RemoveFinalizer(backend, backendFinalizer)
 	return r.Update(ctx, backend)
 }
@@ -297,6 +314,8 @@ func (r *BackendReconciler) deleteService(ctx context.Context, backend *appsv1al
 }
 
 func (r *BackendReconciler) reconcileDeployment(ctx context.Context, backend *appsv1alpha1.Backend, queueURL string) error {
+	log := logf.FromContext(ctx)
+
 	desired := r.buildDeployment(backend, queueURL)
 	if err := ctrl.SetControllerReference(backend, desired, r.Scheme); err != nil {
 		return err
@@ -308,6 +327,7 @@ func (r *BackendReconciler) reconcileDeployment(ctx context.Context, backend *ap
 		if err := r.Create(ctx, desired); err != nil {
 			return err
 		}
+		log.Info("created deployment", "deployment", desired.Name)
 		r.Recorder.Event(backend, corev1.EventTypeNormal, "DeploymentCreated", "Created deployment")
 		return nil
 	}
@@ -329,11 +349,14 @@ func (r *BackendReconciler) reconcileDeployment(ctx context.Context, backend *ap
 	if err := r.Patch(ctx, existing, patch); err != nil {
 		return err
 	}
+	log.Info("updated deployment", "deployment", existing.Name)
 	r.Recorder.Event(backend, corev1.EventTypeNormal, "DeploymentUpdated", "Updated deployment")
 	return nil
 }
 
 func (r *BackendReconciler) reconcileService(ctx context.Context, backend *appsv1alpha1.Backend) error {
+	log := logf.FromContext(ctx)
+
 	desired := r.buildService(backend)
 	if err := ctrl.SetControllerReference(backend, desired, r.Scheme); err != nil {
 		return err
@@ -342,7 +365,11 @@ func (r *BackendReconciler) reconcileService(ctx context.Context, backend *appsv
 	existing := &corev1.Service{}
 	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
 	if errors.IsNotFound(err) {
-		return r.Create(ctx, desired)
+		if err := r.Create(ctx, desired); err != nil {
+			return err
+		}
+		log.Info("created service", "service", desired.Name)
+		return nil
 	}
 	if err != nil {
 		return err
@@ -354,7 +381,11 @@ func (r *BackendReconciler) reconcileService(ctx context.Context, backend *appsv
 	}
 	existing.Spec.Ports = desired.Spec.Ports
 	existing.Spec.Selector = desired.Spec.Selector
-	return r.Update(ctx, existing)
+	if err := r.Update(ctx, existing); err != nil {
+		return err
+	}
+	log.Info("updated service", "service", existing.Name)
+	return nil
 }
 
 func (r *BackendReconciler) updateStatus(ctx context.Context, backend *appsv1alpha1.Backend, queueURL string) error {
