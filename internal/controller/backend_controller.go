@@ -408,6 +408,8 @@ func (r *BackendReconciler) updateStatus(ctx context.Context, backend *appsv1alp
 			ObservedGeneration: backend.Generation,
 			LastTransitionTime: metav1.Now(),
 		})
+	} else {
+		backend.Status.Conditions = removeCondition(backend.Status.Conditions, "SQSReady")
 	}
 
 	return client.IgnoreNotFound(r.Status().Patch(ctx, backend, patch))
@@ -566,6 +568,16 @@ func findCondition(conditions []metav1.Condition, condType string) *metav1.Condi
 		}
 	}
 	return nil
+}
+
+func removeCondition(conditions []metav1.Condition, condType string) []metav1.Condition {
+	result := make([]metav1.Condition, 0, len(conditions))
+	for _, c := range conditions {
+		if c.Type != condType {
+			result = append(result, c)
+		}
+	}
+	return result
 }
 
 // SetupWithManager sets up the controller with the Manager.
