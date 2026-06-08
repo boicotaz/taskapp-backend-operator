@@ -16,6 +16,9 @@ endif
 # tools. (i.e. podman)
 CONTAINER_TOOL ?= docker
 
+# Path to the CRD file in the Helm chart (relative to this Makefile)
+HELM_CRD ?= ../../helm-charts/backend-operator/templates/backend-crd.yaml
+
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
 SHELL = /usr/bin/env bash -o pipefail
@@ -46,6 +49,10 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+
+.PHONY: sync-helm-crd
+sync-helm-crd: manifests ## Sync the generated CRD into the Helm chart.
+	cp config/crd/bases/apps.taskapp.io_backends.yaml "$(HELM_CRD)"
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
